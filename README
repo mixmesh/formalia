@@ -3,5 +3,5 @@ Här är en liten start
 
 kör tex:
 
-> form_bw:convert("forms/passport_form.png", "out8.png").
+> form_bw:convert("formalia/forms/passport_form.png", "out8.png").
 > form_bw:tesseract("out8.png").
