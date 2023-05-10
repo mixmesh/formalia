@@ -1,0 +1,7 @@
+Här är en liten start
+(installera terseract)
+
+kör tex:
+
+> form_bw:convert("forms/passport_form.png", "out8.png").
+> form_bw:tesseract("out8.png").
