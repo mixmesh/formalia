@@ -9,4 +9,4 @@ clean:
 	rm -f $(ERL_OBJECTS) *.img
 
 ../ebin/%.beam: %.erl
-	$(ERLC) $(ERLC_FLAGS) $<
+	$(ERLC) $(ERLC_FLAGS) -o ../ebin $<
