@@ -445,12 +445,15 @@ boxes(InputName, OutputName, LangList) ->
     VBoxes1 = box_map_to_list(VBoxesMap2),
     draw_boxes(Out, VBoxes1),
     TextBoxes = tesseract(InputName, LangList),
-    FontMap = match_fonts(TextBoxes, #{}),
+    FontMap = load_fonts([{"arial", Size} || 
+			     Size <- [10,12,14,16,18,20,22,24,26,28,
+				      30,32,34,36,38,40,42,44,46,48]]),
+    %% FontMap = match_fonts(TextBoxes, #{}),
+
     epx_gc:set_fill_style(none),
     draw_text_boxes(Out, TextBoxes, FontMap),
     write_png_file(OutputName, Out),
     TextBoxes.
-
 
 match_fonts([{word,Opts,_Data}|Es], FontMap) ->
     case lists:keyfind(bbox, 1, Opts) of
@@ -462,7 +465,7 @@ match_fonts([{word,Opts,_Data}|Es], FontMap) ->
 		    %% io:format("h=~w\n", [H]),
 		    case epx_font:match([{name, "Arial"},{weight,medium},
 					 {slant,roman},{size, H}]) of
-			false -> 
+			false ->
 			    io:format("warning: font size ~w not found\n", [H]),
 			    match_fonts(Es, FontMap);
 			{ok,Font} ->
@@ -478,6 +481,46 @@ match_fonts([{_Tag,_Opts,Es0}|Es], FontMap) ->
     match_fonts(Es, FontMap1);
 match_fonts([], FontMap) ->
     FontMap.
+
+%% Given a text and box find the best fitting font
+find_text_box_font(Text, Box, FontMap) ->
+    FontList = lists:keysort(1, maps:to_list(FontMap)),
+    find_text_box_font_(Text, Box, FontList).
+
+%% assume there are some fonts
+find_text_box_font_(String, Box, [{Size,Font}|Fs]) ->
+    {W, H} = epx_font:dimension(Font, String),
+    find_text_box_font_(String, Box, Fs, {Font,Size,W,H}).
+
+find_text_box_font_(String, Box, [{Size,Font}|Fs], {Font0,_Size0,_W0,_H0}) ->
+    {W, H} = epx_font:dimension(Font, String),
+    if W < Box#box.w ->
+	    find_text_box_font_(String, Box, Fs, {Font,Size,W,H});
+       true ->
+	    Font0
+    end;
+find_text_box_font_(_String, _Box, [], {Font0,_Size0,_W0,_H0}) ->
+    Font0.
+    
+
+load_fonts(Fs) ->
+    load_fonts(Fs, #{}).
+
+load_fonts([{Name,Size}|Fs], FontMap) ->
+    BaseName = Name++integer_to_list(Size)++".efnt",
+    Filename = filename:join([code:priv_dir(epx),"fonts",BaseName]),
+    try epx:font_open(Filename) of
+	F ->
+	    epx:font_map(F),
+	    load_fonts(Fs, maps:put(Size, F, FontMap))
+    catch
+	error:_ ->
+	    io:format("unable to load font ~s\n", [Filename]),
+	    load_fonts(Fs, FontMap)
+    end;
+load_fonts([], FontMap) ->
+    FontMap.
+    
 
 %% Make next bigger even number height
 bbox_font_height(Box) ->
@@ -522,8 +565,11 @@ draw_text_boxes(Pixmap, [{line,Opts,Boxes} | Es], FontMap) ->
     draw_text_boxes(Pixmap, Es, FontMap);
 draw_text_boxes(Pixmap, [{word,Opts,[{cdata,Text}]} | Es], FontMap) ->
     Box = lists:keyfind(bbox, 1, Opts),
-    H = bbox_font_height(Box),
-    Font = get_font(H, FontMap),
+
+    %% H = bbox_font_height(Box),
+    %% Font = get_font(H, FontMap),
+    Font = find_text_box_font(Text, Box, FontMap),
+
     epx_gc:set_font(Font),
     epx_gc:set_foreground_color({0,0,0,0}),
     [{_, Ascent}] = epx:font_info(Font, [ascent]),
