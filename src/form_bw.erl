@@ -22,14 +22,16 @@
 -record(box, { x, y, w, h }).
 -record(bbox, { x0, y0, x1, y1 }).
 
-%% FIXME:
-%% 1 - run avg to the l8 map
-%% 2 - each pixel check if luminance of src is > l8 map
-%%
+%% Convert image into black and white (2-level map) l8 png
 convert(InputName) ->
+    convert_bw(InputName).
+convert(InputName,OutputName) ->
+    convert_bw(InputName,OutputName).
+
+convert_bw(InputName) ->
     BaseName = filename:basename(InputName, filename:extension(InputName)),
-    convert(InputName, BaseName ++ "8.png").
-convert(InputName, OutputName) ->
+    convert_bw(InputName, BaseName ++ "8.png").
+convert_bw(InputName, OutputName) ->
     {ok,IMG} = epx_image:load(InputName),
     [In|_] = epx_image:pixmaps(IMG),
     %% convert into black/white 8 bit image
@@ -43,8 +45,125 @@ convert(InputName, OutputName) ->
 			   {N, N, lists:duplicate(N*N,1)},
 			   0, 0, 0, 0, W, H),
     %% filter_data(In, Out, W, H, 8, 8),
-    bw_data(In, Out),
+    bw_data(Out, In, 0.8),  %% 80%
+    clean_data(Out),
     write_png_file(OutputName, Out).
+
+clean_data(Pixmap) ->
+    [{width,W},{height,H}] = epx:pixmap_info(Pixmap, [width,height]),
+    clean_x(0, W, 0, H, Pixmap).
+
+clean_x(X, W, Y, H, Pixmap) when X >= W ->
+    if Y+1 >= H ->
+	    ok;
+       true ->
+	    clean_x(0, W, Y+1, H, Pixmap)
+    end;
+clean_x(X, W, Y, H, Pixmap) ->
+    case is_white(X, Y, Pixmap) of
+	false ->
+	    clean_x(X+1,W,Y,H,Pixmap);
+	true ->
+	    case is_speck5x5(X, Y, Pixmap) of
+		true ->
+		    blank_5x5(X, Y, Pixmap),
+		    clean_x(X+4, W, Y, H, Pixmap);
+		false ->
+		    clean_x(X+1,W,Y,H,Pixmap)
+	    end
+    end.
+
+
+is_speck3x3(X, Y, Pixmap) ->
+    all_white(X, Y, Pixmap, 
+	      [{w,0,0},{w,1,0},{w,2,0},
+	       {w,0,1},{b,1,1},{w,2,1},
+	       {w,0,2},{w,1,2},{w,2,2}]).
+
+blank_3x3(X, Y, Pixmap) ->
+    epx:pixmap_put_pixel(Pixmap, X+1, Y+1, {255,255,255}).
+
+is_speck4x4(X, Y, Pixmap) ->
+    all_white(X, Y, Pixmap, 
+	      [{w,0,0},{w,1,0},{w,2,0},{w,3,0},
+	       {w,0,1},{b,1,1},{b,2,1},{w,3,1},
+	       {w,0,2},{b,1,2},{b,2,2},{w,3,2},
+	       {w,0,3},{w,1,3},{w,2,3},{w,3,3}]).
+
+blank_4x4(X, Y, Pixmap) ->
+    epx:pixmap_put_pixel(Pixmap, X+1, Y+1, {255,255,255}),
+    epx:pixmap_put_pixel(Pixmap, X+2, Y+1, {255,255,255}),
+    epx:pixmap_put_pixel(Pixmap, X+1, Y+2, {255,255,255}),
+    epx:pixmap_put_pixel(Pixmap, X+2, Y+2, {255,255,255}).
+
+is_speck5x5(X, Y, Pixmap) ->
+    all_white(X, Y, Pixmap, 
+	      [{w,0,0},{w,1,0},{w,2,0},{w,3,0},{w,4,0},
+	       {w,0,1},{b,1,1},{b,2,1},{b,3,1},{w,4,1},
+	       {w,0,2},{b,1,2},{b,2,2},{b,3,2},{w,4,2},
+	       {w,0,3},{b,1,3},{b,2,3},{b,3,3},{w,4,3},
+	       {w,0,4},{w,1,4},{w,2,4},{w,3,4},{w,4,4}
+	      ]).
+
+blank_5x5(X, Y, Pixmap) ->
+    epx:pixmap_put_pixel(Pixmap, X+1, Y+1, {255,255,255}),
+    epx:pixmap_put_pixel(Pixmap, X+2, Y+1, {255,255,255}),
+    epx:pixmap_put_pixel(Pixmap, X+3, Y+1, {255,255,255}),
+    epx:pixmap_put_pixel(Pixmap, X+1, Y+2, {255,255,255}),
+    epx:pixmap_put_pixel(Pixmap, X+2, Y+2, {255,255,255}),
+    epx:pixmap_put_pixel(Pixmap, X+3, Y+2, {255,255,255}),
+    epx:pixmap_put_pixel(Pixmap, X+1, Y+3, {255,255,255}),
+    epx:pixmap_put_pixel(Pixmap, X+2, Y+3, {255,255,255}),
+    epx:pixmap_put_pixel(Pixmap, X+3, Y+3, {255,255,255}).
+
+
+all_white(X, Y, Pixmap, XYs) ->
+    all_white(X, Y, Pixmap, XYs, 0).
+
+all_white(X, Y, Pixmap, [{w,Xd,Yd}|XYs],Bs) ->
+    case is_white(X+Xd,Y+Yd,Pixmap) of
+	true -> all_white(X,Y,Pixmap,XYs,Bs);
+	false -> false
+    end;
+all_white(X, Y, Pixmap, [{b,Xd,Yd}|XYs],Bs) ->
+    case is_black(X+Xd,Y+Yd,Pixmap) of
+	true -> all_white(X,Y,Pixmap,XYs,Bs+1);
+	false -> all_white(X,Y,Pixmap,XYs,Bs)
+    end;    
+all_white(_X,_Y,_Pixmap,[],Bs) ->
+    Bs > 0.
+
+is_white(X, Y, Pixmap) ->
+    {_A1,L1,L1,L1} = epx:pixmap_get_pixel(Pixmap, X, Y), 
+    L1 =:= 255.
+
+is_black(X, Y, Pixmap) ->
+    {_A1,L1,L1,L1} = epx:pixmap_get_pixel(Pixmap, X, Y), 
+    L1 =:= 0.
+
+%% Map the filtered gray scale map into 2 level white {255,255,255}
+%% and black {0,0,0}
+%% In is the original argb pixmap and Out is the gray level map average
+%%  over 8x8 patches is filter_area.
+bw_data(Out, In, Factor) ->
+    fold_pixels(
+      fun(X,Y,Pixel,_Acc) ->
+	      L0 = rgb_to_luminance(Pixel), %% original luminance 
+	      %% average luminance
+	      {_A1,L1,L1,L1} = epx:pixmap_get_pixel(Out, X, Y), 
+	      if Factor*L1 < L0 ->
+		      epx:pixmap_put_pixel(Out, X, Y, {255,255,255});
+		 true ->
+		      epx:pixmap_put_pixel(Out, X, Y, {0,0,0})
+	      end
+      end, ok, In).
+	      
+rgb_to_luminance({_A, R, G, B}) ->
+    rgb_to_luminance(R, G, B);
+rgb_to_luminance({R, G, B}) ->
+    rgb_to_luminance(R, G, B).
+rgb_to_luminance(R, G, B) -> %% rgb8!
+    (R*299 + G*587 + B*114) div 1000.
 
 %%
 tesseract(InputName) ->
@@ -448,58 +567,30 @@ boxes(InputName, OutputName, LangList) ->
     FontMap = load_fonts([{"arial", Size} || 
 			     Size <- [10,12,14,16,18,20,22,24,26,28,
 				      30,32,34,36,38,40,42,44,46,48]]),
-    %% FontMap = match_fonts(TextBoxes, #{}),
-
     epx_gc:set_fill_style(none),
     draw_text_boxes(Out, TextBoxes, FontMap),
     write_png_file(OutputName, Out),
     TextBoxes.
 
-match_fonts([{word,Opts,_Data}|Es], FontMap) ->
-    case lists:keyfind(bbox, 1, Opts) of
-	false -> match_fonts(Es, FontMap);
-	Box -> 
-	    H = bbox_font_height(Box),
-	    case maps:get(H, FontMap, false) of
-		false ->
-		    %% io:format("h=~w\n", [H]),
-		    case epx_font:match([{name, "Arial"},{weight,medium},
-					 {slant,roman},{size, H}]) of
-			false ->
-			    io:format("warning: font size ~w not found\n", [H]),
-			    match_fonts(Es, FontMap);
-			{ok,Font} ->
-			    io:format("info: loaded font size ~w\n", [H]),
-			    match_fonts(Es, FontMap#{ H => Font })
-		    end;
-		_Font ->
-		    match_fonts(Es, FontMap)
-	    end
-    end;
-match_fonts([{_Tag,_Opts,Es0}|Es], FontMap) ->
-    FontMap1 = match_fonts(Es0, FontMap),
-    match_fonts(Es, FontMap1);
-match_fonts([], FontMap) ->
-    FontMap.
 
 %% Given a text and box find the best fitting font
-find_text_box_font(Text, Box, FontMap) ->
+find_text_box_font(Text, BBox, FontMap) ->
     FontList = lists:keysort(1, maps:to_list(FontMap)),
-    find_text_box_font_(Text, Box, FontList).
+    find_text_box_font_(Text, BBox, FontList).
 
 %% assume there are some fonts
-find_text_box_font_(String, Box, [{Size,Font}|Fs]) ->
-    {W, H} = epx_font:dimension(Font, String),
-    find_text_box_font_(String, Box, Fs, {Font,Size,W,H}).
+find_text_box_font_(String, BBox, [{Size,Font}|Fs]) ->
+    {W,H} = epx_font:dimension(Font, String),
+    find_text_box_font_(String, BBox, Fs, {Font,Size,W,H}).
 
-find_text_box_font_(String, Box, [{Size,Font}|Fs], {Font0,_Size0,_W0,_H0}) ->
-    {W, H} = epx_font:dimension(Font, String),
-    if W < Box#box.w ->
-	    find_text_box_font_(String, Box, Fs, {Font,Size,W,H});
+find_text_box_font_(String, BBox, [{Size,Font}|Fs], {Font0,_Size0,_W0,_H0}) ->
+    {W,H} = epx_font:dimension(Font, String),
+    if W < (BBox#bbox.x1 - BBox#bbox.x0)+1 ->
+	    find_text_box_font_(String, BBox, Fs, {Font,Size,W,H});
        true ->
 	    Font0
     end;
-find_text_box_font_(_String, _Box, [], {Font0,_Size0,_W0,_H0}) ->
+find_text_box_font_(_String, _BBox, [], {Font0,_Size0,_W0,_H0}) ->
     Font0.
     
 
@@ -564,21 +655,22 @@ draw_text_boxes(Pixmap, [{line,Opts,Boxes} | Es], FontMap) ->
     draw_text_boxes(Pixmap, Boxes, FontMap),
     draw_text_boxes(Pixmap, Es, FontMap);
 draw_text_boxes(Pixmap, [{word,Opts,[{cdata,Text}]} | Es], FontMap) ->
-    Box = lists:keyfind(bbox, 1, Opts),
+    BBox = lists:keyfind(bbox, 1, Opts),
 
-    %% H = bbox_font_height(Box),
+    %% H = bbox_font_height(BBox),
     %% Font = get_font(H, FontMap),
-    Font = find_text_box_font(Text, Box, FontMap),
+    Font = find_text_box_font(Text, BBox, FontMap),
 
     epx_gc:set_font(Font),
     epx_gc:set_foreground_color({0,0,0,0}),
     [{_, Ascent}] = epx:font_info(Font, [ascent]),
     UTF8 = unicode:characters_to_binary(Text, utf8),
-    epx:draw_utf8(Pixmap, Box#bbox.x0, Box#bbox.y0+Ascent, UTF8),
+    %% fixme: center?
+    epx:draw_utf8(Pixmap, BBox#bbox.x0, BBox#bbox.y0+Ascent, UTF8),
     epx_gc:set_border_color({0,255,0}),
-    epx:draw_rectangle(Pixmap, Box#bbox.x0, Box#bbox.y0, 
-		       (Box#bbox.x1 - Box#bbox.x0) + 1,
-		       (Box#bbox.y1 - Box#bbox.y0) + 1),
+    epx:draw_rectangle(Pixmap, BBox#bbox.x0, BBox#bbox.y0, 
+		       (BBox#bbox.x1 - BBox#bbox.x0) + 1,
+		       (BBox#bbox.y1 - BBox#bbox.y0) + 1),
     draw_text_boxes(Pixmap, Es, FontMap);
 draw_text_boxes(Pixmap, [{_Tag,_Opts,Boxes} | Es], FontMap) ->
     %% relative boxes?
@@ -723,29 +815,6 @@ merge_box_list(B1, [B2|L], Key, Acc) ->
     end;
 merge_box_list(_B1, [], _Key, _) ->
     false.
-
-    
-%% Map the filtered gray scale map into 2 level white {255,255,255}
-%% and black {0,0,0}
-bw_data(In, Out) ->
-    fold_pixels(
-      fun(X,Y,Pixel,_Acc) ->
-	      L0 = rgb_to_luminance(Pixel), %% original luminance 
-	      %% averaged luminance
-	      {_A1,L1,L1,L1} = epx:pixmap_get_pixel(Out, X, Y), 
-	      if 5*L0 > 4*L1 -> %% 80%
-		      epx:pixmap_put_pixel(Out, X, Y, {255,255,255});
-		 true ->
-		      epx:pixmap_put_pixel(Out, X, Y, {0,0,0})
-	      end
-      end, ok, In).
-	      
-rgb_to_luminance({_A, R, G, B}) ->
-    rgb_to_luminance(R, G, B);
-rgb_to_luminance({R, G, B}) ->
-    rgb_to_luminance(R, G, B).
-rgb_to_luminance(R, G, B) -> %% rgb8!
-    (R*299 + G*587 + B*114) div 1000.
 
 
 fold_pixels(Fun, Acc, Pixmap) ->
